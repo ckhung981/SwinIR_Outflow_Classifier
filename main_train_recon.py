@@ -30,12 +30,12 @@ def set_seed(seed):
     print(f"Random seed set to: {seed}")
 
 # ==========================================
-# 1. Dataset
+# 1. Dataset (Modified for Dynamic Original Sizes)
 # ==========================================
 class ScientificRecognitionDataset(Dataset):
-    def __init__(self, root_dir, img_size=128, in_chans=1):
+    # 【修改】移除了 img_size 參數，因為我們不再強迫縮放
+    def __init__(self, root_dir, in_chans=1):
         self.root_dir = root_dir
-        self.img_size = img_size
         self.in_chans = in_chans
         if not os.path.exists(root_dir):
             raise FileNotFoundError(f"Directory not found: {root_dir}")
@@ -56,10 +56,13 @@ class ScientificRecognitionDataset(Dataset):
         path, label = self.samples[idx]
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if img is None:
-            img = np.zeros((self.img_size, self.img_size), dtype=np.float32)
+            # Fallback：若圖片損毀，給予一個最小的 8x8 陣列避免訓練崩潰
+            img = np.zeros((8, 8), dtype=np.float32)
         
         img = img.astype(np.float32) / 255.0 
-        img = cv2.resize(img, (self.img_size, self.img_size))
+        
+        # ❌ 【關鍵修改】完全移除 cv2.resize，保持最原始的長寬與幾何比例！
+        # img = cv2.resize(img, (self.img_size, self.img_size))
         
         if self.in_chans == 1:
             img = torch.from_numpy(img).unsqueeze(0)
@@ -94,7 +97,6 @@ def validate(model, test_loader, device, criterion):
 # ==========================================
 def main(manual_seed=None):
     # --- Dynamic Seed Generation ---
-    
     if manual_seed is None:
         # Generate a random integer seed (0 to 2**32 - 1)
         actual_seed = random.randint(0, 2**32 - 1)
@@ -106,13 +108,12 @@ def main(manual_seed=None):
 
     # --- Hyperparameters ---
     params = {
-        "seed": actual_seed, # The generated or manual seed is logged here
+        "seed": actual_seed, 
         "device": 'cuda' if torch.cuda.is_available() else 'cpu',
-        "batch_size": 2,
+        "batch_size": 1,         # 圖片大小不一，Batch Size 必須強制鎖死為 1
         "epochs": 150,
         "lr": 2e-4,
-        "num_classes": 4,
-        "img_size": 512,
+        "num_classes": 16,
         "in_chans": 1,
         "test_every": 10,
         "embed_dim": 96,
@@ -152,17 +153,18 @@ def main(manual_seed=None):
         f.write("------------------------\n\n")
 
     # --- 1. Prepare Data ---
+    # 【修改】初始化 Dataset 時不再傳入 img_size
     train_set = ScientificRecognitionDataset('data/train', 
-                                             img_size=params["img_size"], in_chans=params["in_chans"])
+                                             in_chans=params["in_chans"])
     test_set = ScientificRecognitionDataset('data/test', 
-                                            img_size=params["img_size"], in_chans=params["in_chans"])
+                                            in_chans=params["in_chans"])
     
     train_loader = DataLoader(train_set, batch_size=params["batch_size"], shuffle=True, num_workers=2)
     test_loader = DataLoader(test_set, batch_size=params["batch_size"], shuffle=False, num_workers=2)
     
     # --- 2. Initialize Model ---
     model = SwinIR(
-        img_size=params["img_size"], 
+        img_size=64, # ⚠️ 【修改】傳入一個 Dummy 數值 64 滿足參數需求，因為模型內部會自動依據實際圖片大小計算 Padding
         in_chans=params["in_chans"], 
         num_classes=params["num_classes"],
         window_size=8, 
@@ -187,6 +189,7 @@ def main(manual_seed=None):
             optimizer.zero_grad()
             
             with torch.amp.autocast('cuda'):
+                # 此時的 inputs 將會是保留原始比例的張量形狀，例如 (1, 1, 500, 2000)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 

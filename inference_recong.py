@@ -1,15 +1,29 @@
+'''
+# --- Inference Script for SwinIR Recognition ---
+# This script loads a trained SwinIR model and runs inference on a specified image.
+# It outputs the predicted class and confidence score for the input image.
+# --- Usage ---
+# 1. Set the MODEL_WEIGHTS variable to the path of your trained model weights (.
+    pth file).
+# 2. Set the TARGET_IMAGE variable to the path of the image you want to classify.
+# 3. Set the CLASSES variable to a list of class names corresponding to your model's output classes.
+# 4. Run the script to see the inference results in the console.
+'''
+
+
+
 import torch
 import cv2
 import numpy as np
 import os
 from models.network_swinir_recong import SwinIR
 
-def run_inference(model_path, image_path, num_classes, img_size=128, in_chans=1):
+def run_inference(model_path, image_path, num_classes, in_chans=1):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # 1. Initialize architecture (must match training settings)
     model = SwinIR(
-        img_size=img_size, 
+        img_size=64,  # Dummy value, network dynamically pads via check_image_size
         in_chans=in_chans, 
         num_classes=num_classes,
         window_size=8, 
@@ -32,7 +46,8 @@ def run_inference(model_path, image_path, num_classes, img_size=128, in_chans=1)
         raise ValueError(f"Image not found: {image_path}")
     
     img_input = img.astype(np.float32) / 255.0
-    img_input = cv2.resize(img_input, (img_size, img_size))
+    
+    # Removed cv2.resize to keep the original physical aspect ratio
     
     if in_chans == 1:
         img_tensor = torch.from_numpy(img_input).unsqueeze(0).unsqueeze(0) # (1, 1, H, W)
@@ -65,12 +80,11 @@ if __name__ == '__main__':
             model_path=MODEL_WEIGHTS,
             image_path=TARGET_IMAGE,
             num_classes=len(CLASSES),
-            img_size=128, # Match training img_size
             in_chans=1
         )
         
         print("-" * 40)
-        print(f"Inference Results:")
+        print("Inference Results:")
         print(f"File: {os.path.basename(TARGET_IMAGE)}")
         print(f"Predicted: {CLASSES[class_idx]} (Index: {class_idx})")
         print(f"Confidence: {confidence*100:.2f}%")
