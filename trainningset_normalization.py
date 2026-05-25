@@ -170,10 +170,10 @@ def process_and_categorize_datasets(source_dir, train_dir, preview_dir, low_p, h
 if __name__ == "__main__":
     # --- 參數設定區 ---
     SOURCE_DIR = "./raw_data/data_from_synline"  # 原始資料夾路徑，請自行修改
-    TRAIN_DIR = "data/train"
+    TRAIN_DIR = "normalized_data/train"
     PREVIEW_DIR = "data/trainningset_preview"
     
-    LOWER_PERCENT = 0.6
+    LOWER_PERCENT = 2.0
     UPPER_PERCENT = 0.0
     # ------------------
 

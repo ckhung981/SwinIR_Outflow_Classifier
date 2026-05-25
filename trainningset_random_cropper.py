@@ -132,7 +132,7 @@ if __name__ == "__main__":
     # User Settings
     # ====================================================
     
-    INPUT_DIRECTORY = "./train"  
+    INPUT_DIRECTORY = "./normalized_data/train" 
     OUTPUT_DIRECTORY = "./data/train"
     
     TARGET_CROP_SIZE = (512, 512)
