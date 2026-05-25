@@ -12,6 +12,32 @@ import random
 
 # Ensure this imports the recognition version of SwinIR
 from models.network_swinir_recong import SwinIR 
+import gc
+import torch
+
+def clear_gpu_memory():
+    """
+    Forces garbage collection and clears CUDA cache, 
+    then prints the current VRAM usage to verify it is clean.
+    """
+    if torch.cuda.is_available():
+        gc.collect()
+
+        torch.cuda.empty_cache()
+
+        torch.cuda.reset_peak_memory_stats()
+
+        allocated_memory = torch.cuda.memory_allocated() / (1024 ** 2)
+        reserved_memory = torch.cuda.memory_reserved() / (1024 ** 2)
+        
+        print("=" * 40)
+        print("GPU Memory Status After Clearing:")
+        print(f"Allocated: {allocated_memory:.2f} MB")
+        print(f"Reserved:  {reserved_memory:.2f} MB")
+        print("=" * 40)
+        
+        if allocated_memory > 100:
+            print("[WARNING] GPU memory is not completely clean. Check for zombie processes.")
 
 # ==========================================
 # 0. Set Random Seed for Reproducibility
@@ -96,6 +122,8 @@ def validate(model, test_loader, device, criterion):
 # 3. Main
 # ==========================================
 def main(manual_seed=None):
+    clear_gpu_memory()
+    
     # --- Dynamic Seed Generation ---
     if manual_seed is None:
         # Generate a random integer seed (0 to 2**32 - 1)
@@ -111,19 +139,18 @@ def main(manual_seed=None):
     else:
         raise EnvironmentError("CUDA is not available. Please check your GPU setup.")
         
-    # --- Hyperparameters ---
     params = {
         "seed": actual_seed, 
         "device": 'cuda',
-        "batch_size": 1,         # 圖片大小不一，Batch Size 必須強制鎖死為 1
-        "epochs": 150,
+        "batch_size": 3,       # 圖片大小不一，Batch Size 必須強制鎖死為 1
+        "epochs": 100,
         "lr": 2e-4,
         "num_classes": 16,
         "in_chans": 1,
-        "test_every": 10,
-        "embed_dim": 96,
-        "depths": [6, 6, 6, 6],
-        "num_heads": [6, 6, 6, 6]
+        "test_every": 5,
+        "embed_dim":72,
+        "depths":[4,4,4],
+        "num_heads": [4,4,4]
     }
     
     # --- Timer and Timestamp ---
