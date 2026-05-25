@@ -106,10 +106,15 @@ def main(manual_seed=None):
     # Apply the seed immediately
     set_seed(actual_seed)
 
+    if torch.cuda.is_available():
+        print(f"CUDA is available. Using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        raise EnvironmentError("CUDA is not available. Please check your GPU setup.")
+        
     # --- Hyperparameters ---
     params = {
         "seed": actual_seed, 
-        "device": 'cuda' if torch.cuda.is_available() else 'cpu',
+        "device": 'cuda',
         "batch_size": 1,         # 圖片大小不一，Batch Size 必須強制鎖死為 1
         "epochs": 150,
         "lr": 2e-4,
