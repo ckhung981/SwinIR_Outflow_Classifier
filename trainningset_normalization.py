@@ -1,3 +1,18 @@
+'''
+This script is designed to process a dataset of .tif/.tiff images for
+training a recognition model.
+The main functionalities include:
+1. Classifying images into categories based on their filenames using a user-defined mapping.
+2. Rescaling pixel values of the images to a range of 1-255 (with 0 reserved for background) based on specified lower and upper percentile thresholds.
+3. Generating histograms of pixel values for each image, with visual indicators for the percentile thresholds.
+4. Creating preview images that visually differentiate pixels below the lower threshold (red), above the upper threshold (blue), and those within the thresholds (grayscale).
+5. Organizing the processed images and previews into structured directories for training and diagnostic purposes.
+'''
+
+
+
+
+
 import os
 import cv2
 import numpy as np

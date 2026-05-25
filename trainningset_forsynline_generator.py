@@ -1,3 +1,16 @@
+'''
+This script processes Synline simulation data to generate training images 
+for a SwinIR-based recognition model. It performs the following steps:
+1. Configures parameters for data processing and model training.
+2. Searches for Synline data folders matching specific criteria (N, m, bp, inclination).
+3. Validates the resolution of candidate folders against target values with a tolerance.
+4. Reads the relevant binary data file, reshapes it, applies necessary rotations and flips.
+5. Converts the data to logarithmic scale and saves it as a TIF image.
+6. Logs any cases that fail due to missing files, resolution mismatches, or processing errors
+'''
+
+
+
 import os
 import glob
 import re
