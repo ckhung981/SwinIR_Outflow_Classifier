@@ -4,3 +4,5 @@ raw_data
 */*_pycache_*
 *.err
 *.out
+*.tif
+
