@@ -15,7 +15,7 @@ def generate_random_crops(
     delete_original=True
 ):
     """
-    Random crop generator for scientific datasets.
+    Random crop generator for scientific datasets with random padding logic.
     
     Parameters:
     - input_dir: Path to the original dataset directory (subfolders are preserved).
@@ -64,14 +64,20 @@ def generate_random_crops(
             
         h, w = img.shape[:2]
         
-        # Padding protection if the original image is smaller than the target crop size
+        # Random padding logic if the original image is smaller than the target crop size
         pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
+        
         if h < crop_h:
-            pad_bottom = crop_h - h
-        if w < crop_w:
-            pad_right = crop_w - w
+            total_pad_h = crop_h - h
+            pad_top = random.randint(0, total_pad_h)
+            pad_bottom = total_pad_h - pad_top
             
-        if pad_bottom > 0 or pad_right > 0:
+        if w < crop_w:
+            total_pad_w = crop_w - w
+            pad_left = random.randint(0, total_pad_w)
+            pad_right = total_pad_w - pad_left
+            
+        if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
             img = cv2.copyMakeBorder(
                 img, pad_top, pad_bottom, pad_left, pad_right, 
                 cv2.BORDER_CONSTANT, value=background_value
@@ -120,22 +126,22 @@ def generate_random_crops(
     print("-" * 40)
     print(f"Task completed! Total valid crops generated: {total_generated}")
     print(f"Output directory: {output_dir}")
-
+    
 if __name__ == "__main__":
     # ====================================================
     # User Settings
     # ====================================================
     
-    INPUT_DIRECTORY = "./data/train"  
+    INPUT_DIRECTORY = "./train"  
     OUTPUT_DIRECTORY = "./data/train"
     
-    TARGET_CROP_SIZE = (256, 256)
-    NUM_CROPS = 10 
-    BG_VAL = -32.0 
-    MIN_FEATURE_RATIO = 0.05 
+    TARGET_CROP_SIZE = (512, 512)
+    NUM_CROPS = 5
+    BG_VAL = 0 
+    MIN_FEATURE_RATIO = 0.20 
     
     # Set to True to delete the original image after cropping
-    DELETE_ORIGINAL_FILES = True
+    DELETE_ORIGINAL_FILES = False
     
     generate_random_crops(
         input_dir=INPUT_DIRECTORY,
