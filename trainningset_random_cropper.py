@@ -4,28 +4,21 @@ import numpy as np
 import random
 from pathlib import Path
 
-def generate_random_crops(
+def generate_crops(
     input_dir, 
     output_dir, 
-    crop_size=(256, 256), 
-    num_crops_per_image=10, 
-    background_value=-32.0, 
+    crop_mode='random',       # 'random' (隨機裁切) 或 'fixed' (固定範圍裁切)
+    crop_size=(512, 512),     # 用於 random 模式的裁切大小 (H, W)
+    num_crops_per_image=10,   # 用於 random 模式的生成數量
+    fixed_box=(0, 0, 512, 512), # 用於 fixed 模式的範圍 (x_start, y_start, width, height)
+    background_value=0, 
     min_valid_ratio=0.05, 
     max_retries=100,
-    delete_original=True
+    delete_original=False
 ):
     """
-    Random crop generator for scientific datasets with random padding logic.
-    
-    Parameters:
-    - input_dir: Path to the original dataset directory (subfolders are preserved).
-    - output_dir: Path to save the cropped images.
-    - crop_size: Tuple of (Height, Width) for the output crops.
-    - num_crops_per_image: Target number of crops to generate per original image.
-    - background_value: Value representing the background (e.g., -32.0 for log TIF).
-    - min_valid_ratio: Minimum ratio (0.0~1.0) of non-background pixels required in a crop.
-    - max_retries: Maximum attempts to find a valid crop per image to avoid infinite loops.
-    - delete_original: If True, deletes the original image file after processing.
+    Image crop generator for scientific datasets supporting both random and fixed regions.
+    The fixed region origin (0,0) is set to the bottom-center of the image.
     """
     
     input_path = Path(input_dir)
@@ -45,9 +38,12 @@ def generate_random_crops(
         return
 
     print(f"Found {len(all_files)} original images. Starting cropping process...")
-    print(f"Settings: Crop Size {crop_size}, {num_crops_per_image} crops/img, Min Valid Ratio {min_valid_ratio}")
+    print(f"Mode: {crop_mode.upper()}")
+    if crop_mode == 'random':
+        print(f"Settings: Crop Size {crop_size}, {num_crops_per_image} crops/img, Min Valid Ratio {min_valid_ratio}")
+    else:
+        print(f"Settings: Fixed Box (x={fixed_box[0]}, y={fixed_box[1]}, w={fixed_box[2]}, h={fixed_box[3]}) [Origin: Bottom-Center]")
     
-    crop_h, crop_w = crop_size
     total_generated = 0
     
     for file_path in all_files:
@@ -64,58 +60,87 @@ def generate_random_crops(
             
         h, w = img.shape[:2]
         
-        # Random padding logic if the original image is smaller than the target crop size
-        pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
-        
-        if h < crop_h:
-            total_pad_h = crop_h - h
-            pad_top = random.randint(0, total_pad_h)
-            pad_bottom = total_pad_h - pad_top
-            
-        if w < crop_w:
-            total_pad_w = crop_w - w
-            pad_left = random.randint(0, total_pad_w)
-            pad_right = total_pad_w - pad_left
-            
-        if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
-            img = cv2.copyMakeBorder(
-                img, pad_top, pad_bottom, pad_left, pad_right, 
-                cv2.BORDER_CONSTANT, value=background_value
-            )
-            h, w = img.shape[:2]
+        if crop_mode == 'fixed':
+            ux, uy, fw, fh = fixed_box
 
-        crops_found = 0
-        retries = 0
-        
-        while crops_found < num_crops_per_image and retries < max_retries:
-            x_start = random.randint(0, w - crop_w)
-            y_start = random.randint(0, h - crop_h)
-            
-            crop_img = img[y_start:y_start+crop_h, x_start:x_start+crop_w]
-            
-            if isinstance(background_value, float):
-                valid_pixels = np.sum(~np.isclose(crop_img, background_value, atol=1e-5))
-            else:
-                valid_pixels = np.sum(crop_img != background_value)
-                
-            valid_ratio = valid_pixels / (crop_h * crop_w)
-            
-            if valid_ratio >= min_valid_ratio:
-                out_filename = f"{file_path.stem}_crop_{crops_found+1:03d}{file_path.suffix}"
-                out_filepath = save_dir / out_filename
-                
-                cv2.imwrite(str(out_filepath), crop_img)
-                crops_found += 1
-                total_generated += 1
-            else:
-                retries += 1
-                
-        if crops_found < num_crops_per_image:
-            print(f"[INFO] {file_path.name}: Found {crops_found}/{num_crops_per_image} valid crops after {max_retries} retries.")
-        else:
-            print(f"[SUCCESS] {file_path.name} -> Generated {crops_found} crops.")
+            fx = int((w // 2) + ux)      
+            fy = int(h - uy - fh)         
 
-        # Delete the original image if the flag is set
+            if len(img.shape) == 3:
+                crop_img = np.full((fh, fw, img.shape[2]), background_value, dtype=img.dtype)
+            else:
+                crop_img = np.full((fh, fw), background_value, dtype=img.dtype)
+
+            x1_img, y1_img = max(0, fx), max(0, fy)
+            x2_img, y2_img = min(w, fx + fw), min(h, fy + fh)
+            
+            x1_crop, y1_crop = max(0, -fx), max(0, -fy)
+            x2_crop = x1_crop + (x2_img - x1_img)
+            y2_crop = y1_crop + (y2_img - y1_img)
+            
+            if x1_img < x2_img and y1_img < y2_img:
+                crop_img[y1_crop:y2_crop, x1_crop:x2_crop] = img[y1_img:y2_img, x1_img:x2_img]
+                
+            out_filename = f"{file_path.stem}_fixed{file_path.suffix}"
+            out_filepath = save_dir / out_filename
+            cv2.imwrite(str(out_filepath), crop_img)
+            total_generated += 1
+            print(f"[SUCCESS] {file_path.name} -> Generated 1 fixed crop.")
+
+        elif crop_mode == 'random':
+            crop_h, crop_w = crop_size
+            pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
+            
+            if h < crop_h:
+                total_pad_h = crop_h - h
+                pad_top = random.randint(0, total_pad_h)
+                pad_bottom = total_pad_h - pad_top
+                
+            if w < crop_w:
+                total_pad_w = crop_w - w
+                pad_left = random.randint(0, total_pad_w)
+                pad_right = total_pad_w - pad_left
+                
+            if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
+                img = cv2.copyMakeBorder(
+                    img, pad_top, pad_bottom, pad_left, pad_right, 
+                    cv2.BORDER_CONSTANT, value=background_value
+                )
+                h, w = img.shape[:2]
+
+            crops_found = 0
+            retries = 0
+            
+            while crops_found < num_crops_per_image and retries < max_retries:
+                x_start = random.randint(0, w - crop_w)
+                y_start = random.randint(0, h - crop_h)
+                
+                crop_img = img[y_start:y_start+crop_h, x_start:x_start+crop_w]
+                
+                crop_img_float = crop_img.astype(np.float32)
+                
+                if isinstance(background_value, float):
+                    valid_pixels = np.sum(~np.isclose(crop_img_float, background_value, atol=1e-5))
+                else:
+                    valid_pixels = np.sum(crop_img_float != float(background_value))
+                    
+                valid_ratio = valid_pixels / (crop_h * crop_w)
+                
+                if valid_ratio >= min_valid_ratio:
+                    out_filename = f"{file_path.stem}_crop_{crops_found+1:03d}{file_path.suffix}"
+                    out_filepath = save_dir / out_filename
+                    
+                    cv2.imwrite(str(out_filepath), crop_img)
+                    crops_found += 1
+                    total_generated += 1
+                else:
+                    retries += 1
+                    
+            if crops_found < num_crops_per_image:
+                print(f"[INFO] {file_path.name}: Found {crops_found}/{num_crops_per_image} valid crops after {max_retries} retries.")
+            else:
+                print(f"[SUCCESS] {file_path.name} -> Generated {crops_found} crops.")
+
         if delete_original:
             try:
                 file_path.unlink()
@@ -135,19 +160,31 @@ if __name__ == "__main__":
     INPUT_DIRECTORY = "./normalized_data/train" 
     OUTPUT_DIRECTORY = "./data/train"
     
+
+    CROP_MODE = 'fixed' # 'random' or 'fixed'
+    
+    #only used when CROP_MODE = 'random'
+    # (x, y, width, height)
+    #center at bottom-center, with x positive to the right and y positive upwards
+
+    FIXED_CROP_BOX = (-512, 0, 1024, 1024)
+    
+    #only used when CROP_MODE = 'fixed'
     TARGET_CROP_SIZE = (512, 512)
-    NUM_CROPS = 5
-    BG_VAL = 0 
+    NUM_CROPS = 10
     MIN_FEATURE_RATIO = 0.20 
     
-    # Set to True to delete the original image after cropping
+
+    BG_VAL = 0 
     DELETE_ORIGINAL_FILES = False
     
-    generate_random_crops(
+    generate_crops(
         input_dir=INPUT_DIRECTORY,
         output_dir=OUTPUT_DIRECTORY,
+        crop_mode=CROP_MODE,
         crop_size=TARGET_CROP_SIZE,
         num_crops_per_image=NUM_CROPS,
+        fixed_box=FIXED_CROP_BOX,
         background_value=BG_VAL,
         min_valid_ratio=MIN_FEATURE_RATIO,
         delete_original=DELETE_ORIGINAL_FILES
