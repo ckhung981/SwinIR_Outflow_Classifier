@@ -9,8 +9,6 @@ for a SwinIR-based recognition model. It performs the following steps:
 6. Logs any cases that fail due to missing files, resolution mismatches, or processing errors
 '''
 
-
-
 import os
 import glob
 import re
@@ -57,6 +55,14 @@ def check_tolerance(actual_res, target_res, tolerance=0.05):
     return error <= tolerance
 
 def main():
+    # --- [新增] 本地掛載點前綴設定 ---
+    # 取得當前使用者的 Home 目錄路徑 (展開 '~')
+    home_dir = os.path.expanduser("~")
+    # 定義與 shell script 一致的掛載點
+    THEORY_PREFIX = f"{home_dir}/mnt/kawas_theory"
+    SCRATCH_PREFIX = f"{home_dir}/mnt/kawas_scratch"
+    # ----------------------------------
+
     # --- 1. Parameters Configuration ---
     #N_list = [1, 2, 4, 6]
     N_list = [6]
@@ -101,30 +107,30 @@ def main():
                     print("=========================================")
                     print(f"Processing: {case_name}")
                     
-                    # --- 3. Build Search Pattern ---
+                    # --- 3. Build Search Pattern (Modified for Local Mounts) ---
                     if inclination == 90:
                         if m == 999:
                             search_pattern = (
-                                f"/theory/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
+                                f"{THEORY_PREFIX}/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
                                 f"n{n}minf_0v2_{bp_str}_csw6e4_vw100_*/"
                                 f"ly_synline_v0.4.0/small512_16/view90w*h*" 
                             )
                         else:
                             search_pattern = (
-                                f"/scratch/data/ckhung/Synline_data/"
+                                f"{SCRATCH_PREFIX}/ckhung/Synline_data/"
                                 f"n{n}m{m}_{bp_str}_csw6e4_vw100_*/"
                                 f"ly_synline_v0.4.0/aea79d57dc9ca9ca9877c8883e643fb2b3b241b2/view90w*h*" 
                             )
                     else:
                         if m == 999:
                             search_pattern = (
-                                f"/theory/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
+                                f"{THEORY_PREFIX}/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
                                 f"n{n}minf_0v2_{bp_str}_csw6e4_vw100_*/"
                                 f"ly_synline_v0.4.0/small512_16/view{inclination}w*h*s*"
                             )
                         else:
                             search_pattern = (
-                                f"/scratch/data/ckhung/Synline_data/"
+                                f"{SCRATCH_PREFIX}/ckhung/Synline_data/"
                                 f"n{n}m{m}_{bp_str}_csw6e4_vw100_*/"
                                 f"ly_synline_v0.4.0/aea79d57dc9ca9ca9877c8883e643fb2b3b241b2/view{inclination}w*h*s*"
                             )
