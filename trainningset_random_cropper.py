@@ -2,23 +2,26 @@ import os
 import cv2
 import numpy as np
 import random
+import math
+import re
 from pathlib import Path
 
 def generate_crops(
     input_dir, 
     output_dir, 
-    crop_mode='random',       # 'random' (隨機裁切) 或 'fixed' (固定範圍裁切)
-    crop_size=(512, 512),     # 用於 random 模式的裁切大小 (H, W)
-    num_crops_per_image=10,   # 用於 random 模式的生成數量
-    fixed_box=(0, 0, 512, 512), # 用於 fixed 模式的範圍 (x_start, y_start, width, height)
+    crop_mode='random', 
+    crop_size=(512, 512), 
+    num_crops_per_image=10, 
+    fixed_crop_config=None, # 改用 config 字典來傳遞動態裁切參數
     background_value=0, 
     min_valid_ratio=0.05, 
     max_retries=100,
     delete_original=False
 ):
     """
-    Image crop generator for scientific datasets supporting both random and fixed regions.
-    The fixed region origin (0,0) is set to the bottom-center of the image.
+    Image crop generator for scientific datasets supporting both random and dynamic fixed regions.
+    The fixed region dynamically scales the Y-axis steps based on the inclination angle 
+    extracted from the filename, applying a sin(theta) projection correction.
     """
     
     input_path = Path(input_dir)
@@ -39,10 +42,12 @@ def generate_crops(
 
     print(f"Found {len(all_files)} original images. Starting cropping process...")
     print(f"Mode: {crop_mode.upper()}")
+    
     if crop_mode == 'random':
         print(f"Settings: Crop Size {crop_size}, {num_crops_per_image} crops/img, Min Valid Ratio {min_valid_ratio}")
     else:
-        print(f"Settings: Fixed Box (x={fixed_box[0]}, y={fixed_box[1]}, w={fixed_box[2]}, h={fixed_box[3]}) [Origin: Bottom-Center]")
+        print(f"Settings: Dynamic Fixed Mode enabled. Origin: Bottom-Center.")
+        print(f"Base Configuration: {fixed_crop_config}")
     
     total_generated = 0
     
@@ -61,31 +66,52 @@ def generate_crops(
         h, w = img.shape[:2]
         
         if crop_mode == 'fixed':
-            ux, uy, fw, fh = fixed_box
-
-            fx = int((w // 2) + ux)      
-            fy = int(h - uy - fh)         
-
-            if len(img.shape) == 3:
-                crop_img = np.full((fh, fw, img.shape[2]), background_value, dtype=img.dtype)
-            else:
-                crop_img = np.full((fh, fw), background_value, dtype=img.dtype)
-
-            x1_img, y1_img = max(0, fx), max(0, fy)
-            x2_img, y2_img = min(w, fx + fw), min(h, fy + fh)
+            # 1. 取得使用者的基礎設定
+            ux = fixed_crop_config['x']
+            fw = fixed_crop_config['w']
+            fh = fixed_crop_config['h']
+            base_y_steps = fixed_crop_config['base_y_steps']
             
-            x1_crop, y1_crop = max(0, -fx), max(0, -fy)
-            x2_crop = x1_crop + (x2_img - x1_img)
-            y2_crop = y1_crop + (y2_img - y1_img)
-            
-            if x1_img < x2_img and y1_img < y2_img:
-                crop_img[y1_crop:y2_crop, x1_crop:x2_crop] = img[y1_img:y2_img, x1_img:x2_img]
+            # 2. 從檔名自動擷取傾角 (預設 90 度)
+            angle = 90.0 
+            match = re.search(r'_(\d+)deg_', file_path.name)
+            if match:
+                angle = float(match.group(1))
                 
-            out_filename = f"{file_path.stem}_fixed{file_path.suffix}"
-            out_filepath = save_dir / out_filename
-            cv2.imwrite(str(out_filepath), crop_img)
-            total_generated += 1
-            print(f"[SUCCESS] {file_path.name} -> Generated 1 fixed crop.")
+            # 3. 計算 2D 投影的長度壓縮比例 (sin(theta))
+            # 90度: sin(90)=1 (無壓縮) | 165度: sin(165)≈0.258 (嚴重壓縮)
+            projection_scale = abs(math.sin(math.radians(angle)))
+            
+            # 遍歷所有的裁切範圍
+            for box_idx, base_y in enumerate(base_y_steps):
+                # 4. 動態調整 Y 軸的起始點
+                uy = int(base_y * projection_scale)
+
+                fx = int((w // 2) + ux)      
+                fy = int(h - uy - fh)         
+
+                if len(img.shape) == 3:
+                    crop_img = np.full((fh, fw, img.shape[2]), background_value, dtype=img.dtype)
+                else:
+                    crop_img = np.full((fh, fw), background_value, dtype=img.dtype)
+
+                x1_img, y1_img = max(0, fx), max(0, fy)
+                x2_img, y2_img = min(w, fx + fw), min(h, fy + fh)
+                
+                x1_crop, y1_crop = max(0, -fx), max(0, -fy)
+                x2_crop = x1_crop + (x2_img - x1_img)
+                y2_crop = y1_crop + (y2_img - y1_img)
+                
+                if x1_img < x2_img and y1_img < y2_img:
+                    crop_img[y1_crop:y2_crop, x1_crop:x2_crop] = img[y1_img:y2_img, x1_img:x2_img]
+                    
+                # 在檔名加上編號以區分不同的裁切範圍
+                out_filename = f"{file_path.stem}_fixed_{box_idx:02d}{file_path.suffix}"
+                out_filepath = save_dir / out_filename
+                cv2.imwrite(str(out_filepath), crop_img)
+                total_generated += 1
+                
+            print(f"[SUCCESS] {file_path.name} -> Angle: {angle}°, Scale: {projection_scale:.2f} -> Generated {len(base_y_steps)} crops.")
 
         elif crop_mode == 'random':
             crop_h, crop_w = crop_size
@@ -157,24 +183,27 @@ if __name__ == "__main__":
     # User Settings
     # ====================================================
     
-    INPUT_DIRECTORY = "./normalized_data/train" 
+    INPUT_DIRECTORY = "./resized_conv_data/train" 
     OUTPUT_DIRECTORY = "./data/train"
     
-
     CROP_MODE = 'fixed' # 'random' or 'fixed'
     
-    #only used when CROP_MODE = 'random'
-    # (x, y, width, height)
-    #center at bottom-center, with x positive to the right and y positive upwards
-
-    FIXED_CROP_BOX = (-512, 0, 1024, 1024)
+    # 針對動態裁切的設定
+    # x: 裁切框左下角的水平起點 (影像中心點為 0)
+    # w, h: 裁切框的大小
+    # base_y_steps: 以 90 度 (無壓縮) 為基準時，各切片 Y 軸的起點高度
+    DYNAMIC_FIXED_CONFIG = {
+        'x': -256,
+        'w': 512,
+        'h': 512,
+        'base_y_steps': [0, 128, 256, 384]
+    }
     
-    #only used when CROP_MODE = 'fixed'
+    # 僅用於 random 模式
     TARGET_CROP_SIZE = (512, 512)
     NUM_CROPS = 10
     MIN_FEATURE_RATIO = 0.20 
     
-
     BG_VAL = 0 
     DELETE_ORIGINAL_FILES = False
     
@@ -184,7 +213,7 @@ if __name__ == "__main__":
         crop_mode=CROP_MODE,
         crop_size=TARGET_CROP_SIZE,
         num_crops_per_image=NUM_CROPS,
-        fixed_box=FIXED_CROP_BOX,
+        fixed_crop_config=DYNAMIC_FIXED_CONFIG,
         background_value=BG_VAL,
         min_valid_ratio=MIN_FEATURE_RATIO,
         delete_original=DELETE_ORIGINAL_FILES
