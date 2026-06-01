@@ -1,13 +1,9 @@
 '''
-# --- Inference Script for SwinIR Recognition ---
-# This script loads a trained SwinIR model and runs inference on a specified image.
-# It dynamically reads model parameters from a training_info.txt file located
-# in the same directory as the model weights and outputs the top-3 predictions.
-# --- Usage ---
-# 1. Set the MODEL_WEIGHTS variable to the path of your trained model weights (.pth file).
-# 2. Set the TARGET_IMAGE variable to the path of the image you want to classify.
-# 3. Set the CLASSES variable to a list of class names corresponding to your model's output classes.
-# 4. Run the script to see the top-3 inference results in the console.
+# --- Inference & Validation Script for SwinIR Recognition ---
+# This script loads a trained SwinIR model and runs inference or validation.
+# - If TARGET_PATH is a file: Outputs top-3 predictions and group classification.
+# - If TARGET_PATH is a directory: Runs full validation on the dataset (expects class subfolders)
+#   and outputs Top-1/2/3 and Group Top-1/2/3 accuracies.
 '''
 
 import torch
@@ -15,13 +11,48 @@ import cv2
 import numpy as np
 import os
 import ast
+from torch.utils.data import DataLoader, Dataset
 from models.network_swinir_recong import SwinIR
 
+# ==========================================
+# 1. Dataset & Utilities
+# ==========================================
+class ScientificRecognitionDataset(Dataset):
+    def __init__(self, root_dir, in_chans=1):
+        self.root_dir = root_dir
+        self.in_chans = in_chans
+        if not os.path.exists(root_dir):
+            raise FileNotFoundError(f"Directory not found: {root_dir}")
+        self.classes = sorted(os.listdir(root_dir))
+        self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
+        self.samples = []
+        
+        for cls_name in self.classes:
+            cls_dir = os.path.join(root_dir, cls_name)
+            if os.path.isdir(cls_dir):
+                for img_name in os.listdir(cls_dir):
+                    self.samples.append((os.path.join(cls_dir, img_name), self.class_to_idx[cls_name]))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        
+        if img is None:
+            img = np.zeros((8, 8), dtype=np.float32)
+            
+        img = img.astype(np.float32) / 255.0 
+        
+        if self.in_chans == 1:
+            img = torch.from_numpy(img).unsqueeze(0)
+        else:
+            img = torch.from_numpy(img).transpose(2, 0, 1)
+        return img, label
+
 def parse_training_info(txt_path):
-    """
-    Parses the training_info.txt file to extract model parameters.
-    Assumes the file contains key-value pairs separated by ':' or '='.
-    """
+    """Parses the training_info.txt file to extract model parameters."""
     params = {}
     if not os.path.exists(txt_path):
         print(f"Warning: {txt_path} not found. Using default parameters.")
@@ -30,11 +61,9 @@ def parse_training_info(txt_path):
     with open(txt_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
-            # Skip empty lines or comments
             if not line or line.startswith('#'):
                 continue
             
-            # Split by either ':' or '='
             if ':' in line:
                 key, val = line.split(':', 1)
             elif '=' in line:
@@ -46,26 +75,19 @@ def parse_training_info(txt_path):
             val = val.strip()
             
             try:
-                # Safely evaluate strings to Python objects (e.g., lists, ints, floats)
                 val = ast.literal_eval(val)
             except (ValueError, SyntaxError):
-                # Keep as string if parsing fails (e.g., for upsampler='')
                 pass
             params[key] = val
             
     return params
 
-def run_inference(model_path, image_path, classes_list, fallback_in_chans=1):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Locate training_info.txt in the same directory as the model weights
+def load_model_dynamically(model_path, classes_list, fallback_in_chans, device):
+    """Loads the model architecture and weights based on training_info.txt."""
     model_dir = os.path.dirname(model_path)
     info_path = os.path.join(model_dir, 'training_info.txt')
-    
-    # Parse parameters from the text file
     parsed_params = parse_training_info(info_path)
     
-    # Set default parameters and override with parsed ones if they exist
     model_kwargs = {
         'img_size': parsed_params.get('img_size', 64),
         'in_chans': parsed_params.get('in_chans', fallback_in_chans),
@@ -82,39 +104,36 @@ def run_inference(model_path, image_path, classes_list, fallback_in_chans=1):
     for k, v in model_kwargs.items():
         print(f"  {k}: {v}")
 
-    # 1. Initialize architecture dynamically
     model = SwinIR(**model_kwargs).to(device)
-
-    # 2. Load weights
     print(f"Loading weights from: {model_path}")
     state_dict = torch.load(model_path, map_location=device)
     model.load_state_dict(state_dict)
     model.eval()
+    
+    return model, model_kwargs['in_chans']
 
-    # 3. Image Preprocessing
+# ==========================================
+# 2. Inference & Validation Logic
+# ==========================================
+def infer_single_image(model, image_path, classes_list, in_chans, device):
+    """Runs inference on a single image and prints Top-3 and Group results."""
     img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise ValueError(f"Image not found: {image_path}")
     
     img_input = img.astype(np.float32) / 255.0
     
-    # Dynamically determine number of channels based on parsed info
-    in_chans = model_kwargs['in_chans']
-    
     if in_chans == 1:
-        # Handle grayscale format if a colored image was loaded
         if len(img_input.shape) == 3:
             img_input = cv2.cvtColor(img_input, cv2.COLOR_BGR2GRAY)
-        img_tensor = torch.from_numpy(img_input).unsqueeze(0).unsqueeze(0) # (1, 1, H, W)
+        img_tensor = torch.from_numpy(img_input).unsqueeze(0).unsqueeze(0)
     else:
-        # Handle RGB format if a grayscale image was loaded
         if len(img_input.shape) == 2:
             img_input = cv2.cvtColor(img_input, cv2.COLOR_GRAY2BGR)
-        img_tensor = torch.from_numpy(img_input).permute(2, 0, 1).unsqueeze(0) # (1, C, H, W)
+        img_tensor = torch.from_numpy(img_input).permute(2, 0, 1).unsqueeze(0)
     
     img_tensor = img_tensor.to(device)
 
-    # 4. Run Inference
     with torch.no_grad():
         if device.type == 'cuda':
             with torch.amp.autocast('cuda'):
@@ -124,39 +143,110 @@ def run_inference(model_path, image_path, classes_list, fallback_in_chans=1):
             
         probabilities = torch.nn.functional.softmax(output, dim=1)
         
-        # Get top-k predictions (up to 3, but handles cases where num_classes < 3)
         k = min(3, len(classes_list))
         topk_confs, topk_indices = torch.topk(probabilities, k=k, dim=1)
         
-        # Convert tensors to lists for easier handling
         topk_confs_list = topk_confs[0].tolist()
         topk_indices_list = topk_indices[0].tolist()
 
-    return topk_indices_list, topk_confs_list
+    # Define the 4 main groups based on your class structure
+    group_names = ['n1 (Group 0)', 'n2 (Group 1)', 'n4 (Group 2)', 'n6 (Group 3)']
 
+    print("-" * 40)
+    print(f"Inference Results for Single File: {os.path.basename(image_path)}")
+    print("-" * 40)
+    
+    for rank, (idx, conf) in enumerate(zip(topk_indices_list, topk_confs_list), start=1):
+        class_name = classes_list[idx]
+        grp_idx = idx // 4
+        grp_name = group_names[grp_idx]
+        
+        print(f" {rank}. {class_name} (Index: {idx})")
+        print(f"    Confidence: {conf*100:.2f}% | Belongs to: {grp_name}")
+        if rank == 1:
+            print("    " + "-"*30)
+
+def validate_directory(model, dir_path, in_chans, device):
+    """Runs a full validation loop over a directory structured with class subfolders."""
+    print(f"Starting directory validation on: {dir_path}")
+    dataset = ScientificRecognitionDataset(dir_path, in_chans=in_chans)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=2)
+    
+    correct_top1, correct_top2, correct_top3 = 0, 0, 0
+    grp_correct_top1, grp_correct_top2, grp_correct_top3 = 0, 0, 0
+    total = 0
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            with torch.amp.autocast('cuda'):
+                outputs = model(inputs)
+            
+            total += labels.size(0)
+            _, top3_preds = outputs.topk(3, 1, True, True)
+            
+            for i in range(labels.size(0)):
+                label = labels[i].item()
+                preds = top3_preds[i].tolist()
+                
+                # Standard Accuracies
+                if label == preds[0]: correct_top1 += 1
+                if label in preds[:2]: correct_top2 += 1
+                if label in preds[:3]: correct_top3 += 1
+                    
+                # Group Accuracies (0-3: Grp0, 4-7: Grp1, 8-11: Grp2, 12-15: Grp3)
+                grp_label = label // 4
+                grp_preds = [p // 4 for p in preds]
+                
+                if grp_label == grp_preds[0]: grp_correct_top1 += 1
+                if grp_label in grp_preds[:2]: grp_correct_top2 += 1
+                if grp_label in grp_preds[:3]: grp_correct_top3 += 1
+    
+    print("-" * 50)
+    print(f"Validation Results for Directory: {os.path.basename(dir_path)}")
+    print(f"Total Samples Processed: {total}")
+    print("-" * 50)
+    print("Standard Class Accuracy (16 Classes):")
+    print(f"  Top-1: {100. * correct_top1 / total:.2f}%")
+    print(f"  Top-2: {100. * correct_top2 / total:.2f}%")
+    print(f"  Top-3: {100. * correct_top3 / total:.2f}%")
+    print("-" * 50)
+    print("Grouped Accuracy (4 Main Groups: n1, n2, n4, n6):")
+    print(f"  Top-1: {100. * grp_correct_top1 / total:.2f}%")
+    print(f"  Top-2: {100. * grp_correct_top2 / total:.2f}%")
+    print(f"  Top-3: {100. * grp_correct_top3 / total:.2f}%")
+    print("-" * 50)
+
+# ==========================================
+# 3. Main Execution
+# ==========================================
 if __name__ == '__main__':
-    MODEL_WEIGHTS = 'model_weights/20260526_132921/model_epoch_45_acc_31.2.pth' 
-    TARGET_IMAGE = 'normalized_data/train/08_n2_m90/output_n2_m90_1bp_150deg_raw.tif'
+    MODEL_WEIGHTS = 'model_weights/20260528_105239/model_epoch_920_acc_93.8.pth' 
+    
+    # You can set TARGET_PATH to either a specific .tif file OR a directory like 'data/test'
+    TARGET_PATH = 'data/validation/'  # Example for single file inference
+    
     CLASSES = ['n1_m6','n1_m30','n1_m60','n1_m90','n2_m6','n2_m30','n2_m60','n2_m90'
-            ,'n4_m6','n4_m30','n4_m60','n4_m90','n6_m6','n6_m30','n6_m60','n6_m90']
+             ,'n4_m6','n4_m30','n4_m60','n4_m90','n6_m6','n6_m30','n6_m60','n6_m90']
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     try:
-        topk_indices, topk_confs = run_inference(
-            model_path=MODEL_WEIGHTS,
-            image_path=TARGET_IMAGE,
-            classes_list=CLASSES,
-            fallback_in_chans=1
+        # Load the model once
+        model, in_chans = load_model_dynamically(
+            model_path=MODEL_WEIGHTS, 
+            classes_list=CLASSES, 
+            fallback_in_chans=1, 
+            device=device
         )
         
-        print("-" * 40)
-        print("Inference Results:")
-        print(f"File: {os.path.basename(TARGET_IMAGE)}")
-        print("Top Predictions:")
-        
-        for rank, (idx, conf) in enumerate(zip(topk_indices, topk_confs), start=1):
-            print(f"  {rank}. {CLASSES[idx]} (Index: {idx}) - Confidence: {conf*100:.2f}%")
+        # Route execution based on path type
+        if os.path.isfile(TARGET_PATH):
+            infer_single_image(model, TARGET_PATH, CLASSES, in_chans, device)
+        elif os.path.isdir(TARGET_PATH):
+            validate_directory(model, TARGET_PATH, in_chans, device)
+        else:
+            print(f"Error: TARGET_PATH '{TARGET_PATH}' does not exist.")
             
-        print("-" * 40)
-        
     except Exception as e:
-        print(f"Inference failed: {e}")
+        print(f"Execution failed: {e}")
