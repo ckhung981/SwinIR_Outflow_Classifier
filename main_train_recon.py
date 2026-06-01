@@ -94,10 +94,17 @@ class ScientificRecognitionDataset(Dataset):
 # 2. Validation
 # ==========================================
 def validate(model, test_loader, device, criterion):
+    """
+    Validates the model and computes Top-1, Top-2, Top-3 accuracies,
+    as well as Grouped Accuracies (4 main groups, 4 classes each).
+    """
     model.eval()
     val_loss = 0.0
-    correct = 0
+    
+    correct_top1, correct_top2, correct_top3 = 0, 0, 0
+    grp_correct_top1, grp_correct_top2, grp_correct_top3 = 0, 0, 0
     total = 0
+    
     with torch.no_grad():
         for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device)
@@ -105,13 +112,46 @@ def validate(model, test_loader, device, criterion):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
             val_loss += loss.item()
-            _, predicted = outputs.max(1)
+            
             total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
+            
+            # Get Top-3 predictions
+            _, top3_preds = outputs.topk(3, 1, True, True)
+            
+            for i in range(labels.size(0)):
+                label = labels[i].item()
+                preds = top3_preds[i].tolist()
+                
+                # Standard Accuracies
+                if label == preds[0]:
+                    correct_top1 += 1
+                if label in preds[:2]:
+                    correct_top2 += 1
+                if label in preds[:3]:
+                    correct_top3 += 1
+                    
+                # Group Accuracies 
+                # Dividing class index by 4 maps 0-15 into groups 0, 1, 2, 3
+                grp_label = label // 4
+                grp_preds = [p // 4 for p in preds]
+                
+                if grp_label == grp_preds[0]:
+                    grp_correct_top1 += 1
+                if grp_label in grp_preds[:2]:
+                    grp_correct_top2 += 1
+                if grp_label in grp_preds[:3]:
+                    grp_correct_top3 += 1
     
-    acc = 100. * correct / total
-    return val_loss / len(test_loader), acc
-
+    metrics = {
+        'loss': val_loss / len(test_loader),
+        'top1': 100. * correct_top1 / total,
+        'top2': 100. * correct_top2 / total,
+        'top3': 100. * correct_top3 / total,
+        'grp_top1': 100. * grp_correct_top1 / total,
+        'grp_top2': 100. * grp_correct_top2 / total,
+        'grp_top3': 100. * grp_correct_top3 / total,
+    }
+    return metrics
 # ==========================================
 # 3. Main
 # ==========================================
@@ -136,21 +176,22 @@ def main(manual_seed=None):
     params = {
         "seed": actual_seed, 
         "device": 'cuda',
-        "batch_size": 3,
+        "batch_size": 6,
         "start_epoch": 0,      # Default value, will be auto-updated if resuming
-        "epochs": 100,         
-        "lr": 1e-4,
+        "epochs": 1200,         
+        "lr": 7e-6,
         "num_classes": 16,
         "in_chans": 1,
         "test_every": 5,
-        "embed_dim": 32,
-        "depths": [3, 3, 3],
-        "num_heads": [4, 4, 4],
+        "embed_dim": 96,
+        "depths": [3, 3, 3, 3],
+        "num_heads": [4, 4, 4, 4],
         
         # --- Resume Training Settings ---
-        "resume_path": "model_weights/20260527_083416/model_epoch_60_acc_31.2.pth", # Path to the checkpoint to resume training
-        "resume_append_dir": False # Whether to append to the existing run directory when resuming
+        "resume_path": "model_weights/20260528_105239/model_epoch_820_acc_90.6.pth", # Path to the checkpoint to resume training
+        "resume_append_dir": True # Whether to append to the existing run directory when resuming
     }
+
     
     start_wall_time = time.time()
     current_time_str = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -241,7 +282,7 @@ def main(manual_seed=None):
         optimizer, 
         mode='min', 
         factor=0.5, 
-        patience=2, 
+        patience=4, 
         min_lr=1e-6
     )
     
@@ -277,22 +318,28 @@ def main(manual_seed=None):
 
         # Validation and Checkpoint Saving
         if (epoch + 1) % params["test_every"] == 0:
-            val_loss, val_acc = validate(model, test_loader, device, criterion)
+            val_metrics = validate(model, test_loader, device, criterion)
+            val_loss = val_metrics['loss']
             
             # Fetch current learning rate
             current_lr = optimizer.param_groups[0]['lr']
             
-            print(f">>> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [Epoch {epoch+1}] "
-                  f"Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.2f}% || "
-                  f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | LR: {current_lr:.2e}")
+            print(f">>> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [Epoch {epoch+1}] ")
+            print(f"    Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.2f}% | LR: {current_lr:.2e}")
+            print(f"    Val Loss:   {val_loss:.4f}")
+            print(f"    n&m Acc -> Top1: {val_metrics['top1']:.2f}% | Top2: {val_metrics['top2']:.2f}% | Top3: {val_metrics['top3']:.2f}%")
+            print(f"    n Acc -> Top1: {val_metrics['grp_top1']:.2f}% | Top2: {val_metrics['grp_top2']:.2f}% | Top3: {val_metrics['grp_top3']:.2f}%")
+            print("-" * 60)
             
-            save_path = os.path.join(run_dir, f'model_epoch_{epoch+1}_acc_{val_acc:.1f}.pth')
+            save_path = os.path.join(run_dir, f'model_epoch_{epoch+1}_acc_{val_metrics["top1"]:.1f}.pth')
             torch.save(model.state_dict(), save_path)
             
             with open(info_file, 'a') as f:
-                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Epoch {epoch+1}: "
-                        f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.2f}%, "
-                        f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.2f}%, LR={current_lr:.2e}\n")
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Epoch {epoch+1}:\n"
+                        f"  Train: Loss={avg_train_loss:.4f}, Acc={train_acc:.2f}%, LR={current_lr:.2e}\n"
+                        f"  Val:   Loss={val_loss:.4f}\n"
+                        f"  n&m Acc: T1={val_metrics['top1']:.2f}%, T2={val_metrics['top2']:.2f}%, T3={val_metrics['top3']:.2f}%\n"
+                        f"  n Acc: T1={val_metrics['grp_top1']:.2f}%, T2={val_metrics['grp_top2']:.2f}%, T3={val_metrics['grp_top3']:.2f}%\n\n")
                 
             # Step the scheduler based on validation loss
             scheduler.step(val_loss)
@@ -301,7 +348,6 @@ def main(manual_seed=None):
             current_lr = optimizer.param_groups[0]['lr']
             print(f">>> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [Epoch {epoch+1}] "
                   f"Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.2f}% | LR: {current_lr:.2e}")
-
     # --- Finalize Training Time ---
     end_wall_time = time.time()
     total_duration = end_wall_time - start_wall_time
