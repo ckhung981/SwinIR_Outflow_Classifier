@@ -256,7 +256,7 @@ def main(manual_seed=None):
     
     # --- 2. Initialize Model ---
     model = SwinIR(
-        img_size=64, 
+        img_size=64, #if the number is not compatible with intput image size, it will be automatically adjusted in the model's forward method
         in_chans=params["in_chans"], 
         num_classes=params["num_classes"],
         window_size=8, 
