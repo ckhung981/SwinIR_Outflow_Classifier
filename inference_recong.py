@@ -201,6 +201,14 @@ def validate_directory(model, dir_path, in_chans, device):
                 if grp_label == grp_preds[0]: grp_correct_top1 += 1
                 if grp_label in grp_preds[:2]: grp_correct_top2 += 1
                 if grp_label in grp_preds[:3]: grp_correct_top3 += 1
+                
+                #Group2 Accuracy (m6, m30, m60, m90)
+                grp2_label = label % 4
+                grp2_preds = [p % 4 for p in preds]
+                if grp2_label == grp2_preds[0]: grp2_correct_top1 += 1
+                if grp2_label in grp2_preds[:2]: grp2_correct_top2 += 1
+                if grp2_label in grp2_preds[:3]: grp2_correct_top3 += 1
+                
     
     print("-" * 50)
     print(f"Validation Results for Directory: {os.path.basename(dir_path)}")
@@ -216,6 +224,12 @@ def validate_directory(model, dir_path, in_chans, device):
     print(f"  Top-2: {100. * grp_correct_top2 / total:.2f}%")
     print(f"  Top-3: {100. * grp_correct_top3 / total:.2f}%")
     print("-" * 50)
+    print("Grouped Accuracy (4 Sub-Groups: m6, m30, m60, m90):")
+    print(f"  Top-1: {100. * grp2_correct_top1 / total:.2f}%")
+    print(f"  Top-2: {100. * grp2_correct_top2 / total:.2f}%")
+    print(f"  Top-3: {100. * grp2_correct_top3 / total:.2f}%")
+    print("-" * 50)
+
 
 # ==========================================
 # 3. Main Execution
