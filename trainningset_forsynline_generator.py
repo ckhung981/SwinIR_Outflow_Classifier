@@ -66,16 +66,17 @@ def main():
     # --- 1. Parameters Configuration ---
     #N_list = [1, 2, 4, 6]
     N_list = [6]
-    m_list = [6,30,60,90]      
+    m_list = [90]      
     bp_list = [1]
+    frame = "00030"
     inclinations = [90, 105, 120, 135, 150, 165]     
     background_value = 1e-32
-    
+    synline_version = '88f988cb1622c04456df8444ca0f844c422998e2'
     # Target resolutions for x, y, z axes 
     target_resolutions = {
-        'x': 1.0,  
-        'y': 1.0,  
-        'z': 1.0   
+        'x': 3.0,  
+        'y': 3.0,  
+        'z': 3.0   
     }
     allowed_tolerance = 0.20
     
@@ -113,26 +114,26 @@ def main():
                             search_pattern = (
                                 f"{THEORY_PREFIX}/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
                                 f"n{n}minf_0v2_{bp_str}_csw6e4_vw100_*/"
-                                f"ly_synline_v0.4.0/small512_16/view90w*h*" 
+                                f"ly_synline_v0.4.0/small512_16/view90w*h*s*{frame}*" 
                             )
                         else:
                             search_pattern = (
                                 f"{SCRATCH_PREFIX}/ckhung/Synline_data/"
                                 f"n{n}m{m}_{bp_str}_csw6e4_vw100_*/"
-                                f"ly_synline_v0.4.0/aea79d57dc9ca9ca9877c8883e643fb2b3b241b2/view90w*h*" 
+                                f"ly_synline_v0.4.0/{synline_version}/view90w*h*s*{frame}*" 
                             )
                     else:
                         if m == 999:
                             search_pattern = (
                                 f"{THEORY_PREFIX}/lts/ckhung/Synline_datacubes/datacube_vtheta_0v2/"
                                 f"n{n}minf_0v2_{bp_str}_csw6e4_vw100_*/"
-                                f"ly_synline_v0.4.0/small512_16/view{inclination}w*h*s*"
+                                f"ly_synline_v0.4.0/small512_16/view{inclination}w*h*s*{frame}*"
                             )
                         else:
                             search_pattern = (
                                 f"{SCRATCH_PREFIX}/ckhung/Synline_data/"
                                 f"n{n}m{m}_{bp_str}_csw6e4_vw100_*/"
-                                f"ly_synline_v0.4.0/aea79d57dc9ca9ca9877c8883e643fb2b3b241b2/view{inclination}w*h*s*"
+                                f"ly_synline_v0.4.0/{synline_version}/view{inclination}w*h*s*{frame}*"
                             )
 
                     print(f"Searching directory pattern: {search_pattern}")
@@ -286,7 +287,7 @@ def main():
                     final_image[final_image <= 0.0] = background_value
                     log_image = np.log10(final_image).astype(np.float32) 
                     
-                    output_filename = f'output_n{n}_m{m}_{bp_str}_{inclination}deg_raw.tif'
+                    output_filename = f'output_n{n}_m{m}_{bp_str}_{inclination}deg_{frame}_raw.tif'
                     output_filepath = os.path.join(output_dir, output_filename)
                     
                     try:
