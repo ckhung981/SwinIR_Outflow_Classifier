@@ -19,11 +19,6 @@ import numpy as np
 import glob
 import matplotlib.pyplot as plt
 
-# ==========================================
-# 使用者自定義：檔名對應分類類別的規則
-# ==========================================
-# key: 檔名(或檔名中包含的關鍵字)
-# value: 對應的分類資料夾名稱
 CATEGORY_MAPPING = {
     "n1_m6_": "01_n1_m6",
     "n1_m30_": "02_n1_m30",
@@ -41,8 +36,7 @@ CATEGORY_MAPPING = {
     "n6_m30_": "14_n6_m30",
     "n6_m60_": "15_n6_m60",
     "n6_m90_": "16_n6_m90",              
-    # 可以在此繼續新增您的自定義規則，例如：
-    # "outflow_test_01": "05_test",
+
 }
 
 def get_category_from_filename(filename, mapping):
@@ -52,12 +46,11 @@ def get_category_from_filename(filename, mapping):
     """
     file_base = os.path.splitext(filename)[0]
     
-    # 尋找檔名是否包含我們定義的關鍵字
+
     for key, category in mapping.items():
         if key in file_base:
             return category
-            
-    # 如果都沒有匹配到，預設放入一個未分類資料夾
+
     return "uncategorized"
 
 def process_and_categorize_datasets(source_dir, train_dir, preview_dir, low_p, high_p, mapping):
@@ -65,7 +58,7 @@ def process_and_categorize_datasets(source_dir, train_dir, preview_dir, low_p, h
     讀取 source_dir 底下的所有 tif/tiff，依照使用者定義的檔名對應邏輯進行分類。
     執行 rescale，繪製 histogram，製作 preview，並分別存入 train_dir 與 preview_dir。
     """
-    # 遞迴尋找所有 tif 與 tiff 檔案
+
     files = glob.glob(os.path.join(source_dir, "**/*.tif"), recursive=True) + \
             glob.glob(os.path.join(source_dir, "**/*.tiff"), recursive=True)
     
@@ -171,7 +164,7 @@ if __name__ == "__main__":
     # --- 參數設定區 ---
     SOURCE_DIR = "./raw_data/data_from_synline"  # 原始資料夾路徑，請自行修改
     TRAIN_DIR = "normalized_data/train"
-    PREVIEW_DIR = "data/trainningset_preview"
+    PREVIEW_DIR = "normalized_data/trainningset_preview"
     
     LOWER_PERCENT = 2.0
     UPPER_PERCENT = 0.0

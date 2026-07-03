@@ -12,7 +12,7 @@ def generate_crops(
     crop_mode='random', 
     crop_size=(512, 512), 
     num_crops_per_image=10, 
-    fixed_crop_config=None, # 改用 config 字典來傳遞動態裁切參數
+    fixed_crop_config=None, 
     background_value=0, 
     min_valid_ratio=0.05, 
     max_retries=100,
@@ -184,9 +184,10 @@ if __name__ == "__main__":
     # ====================================================
     
     INPUT_DIRECTORY = "./resized_conv_data/train" 
-    OUTPUT_DIRECTORY = "./data/train"
+    #OUTPUT_DIRECTORY = "./data/train"
+    OUTPUT_DIRECTORY = "./data/validation"
     
-    CROP_MODE = 'fixed' # 'random' or 'fixed'
+    CROP_MODE = 'random' # 'random' or 'fixed'
     
     # 針對動態裁切的設定
     # x: 裁切框左下角的水平起點 (影像中心點為 0)
@@ -201,8 +202,8 @@ if __name__ == "__main__":
     
     # 僅用於 random 模式
     TARGET_CROP_SIZE = (512, 512)
-    NUM_CROPS = 10
-    MIN_FEATURE_RATIO = 0.20 
+    NUM_CROPS = 3
+    MIN_FEATURE_RATIO = 0.05
     
     BG_VAL = 0 
     DELETE_ORIGINAL_FILES = False
