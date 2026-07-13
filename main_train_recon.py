@@ -108,7 +108,7 @@ def validate(model, test_loader, device, criterion):
     with torch.no_grad():
         for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            with torch.amp.autocast('cuda'):
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
             val_loss += loss.item()
@@ -156,8 +156,10 @@ def validate(model, test_loader, device, criterion):
 # 3. Main
 # ==========================================
 def main(manual_seed=None):
-    clear_gpu_memory()
+    #DEBUG 1
+    torch.autograd.set_detect_anomaly(True)
     
+    clear_gpu_memory()
     # --- Dynamic Seed Generation ---
     if manual_seed is None:
         actual_seed = random.randint(0, 2**32 - 1)
@@ -176,10 +178,10 @@ def main(manual_seed=None):
     params = {
         "seed": actual_seed, 
         "device": 'cuda',
-        "batch_size": 6,
+        "batch_size": 24,
         "start_epoch": 0,      # Default value, will be auto-updated if resuming
         "epochs": 1200,         
-        "lr": 7e-6,
+        "lr": 5.63e-05,
         "num_classes": 16,
         "in_chans": 1,
         "test_every": 5,
@@ -188,7 +190,7 @@ def main(manual_seed=None):
         "num_heads": [4, 4, 4, 4],
         
         # --- Resume Training Settings ---
-        "resume_path": "model_weights/20260528_105239/model_epoch_820_acc_90.6.pth", # Path to the checkpoint to resume training
+        "resume_path": "model_weights/20260706_131648/model_epoch_755_acc_95.3.pth", # Path to the checkpoint to resume training
         "resume_append_dir": True # Whether to append to the existing run directory when resuming
     }
 
@@ -274,14 +276,15 @@ def main(manual_seed=None):
         print("Checkpoint loaded successfully.")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=params["lr"], weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=params["lr"], weight_decay=1e-4, eps=1e-8)
+    
     scaler = torch.amp.GradScaler('cuda')
     
     # Initialize ReduceLROnPlateau Scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min', 
-        factor=0.5, 
+        factor=0.75, 
         patience=4, 
         min_lr=1e-6
     )
@@ -298,13 +301,20 @@ def main(manual_seed=None):
         
         for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(device), labels.to(device)
+              
             optimizer.zero_grad()
             
-            with torch.amp.autocast('cuda'):
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
                 outputs = model(inputs)
+                    
                 loss = criterion(outputs, labels)
             
             scaler.scale(loss).backward()
+            
+            #DEBUG 5
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             scaler.step(optimizer)
             scaler.update()
             
