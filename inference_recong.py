@@ -170,10 +170,11 @@ def validate_directory(model, dir_path, in_chans, device):
     """Runs a full validation loop over a directory structured with class subfolders."""
     print(f"Starting directory validation on: {dir_path}")
     dataset = ScientificRecognitionDataset(dir_path, in_chans=in_chans)
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=2)
     
     correct_top1, correct_top2, correct_top3 = 0, 0, 0
     grp_correct_top1, grp_correct_top2, grp_correct_top3 = 0, 0, 0
+    grp2_correct_top1, grp2_correct_top2, grp2_correct_top3 = 0, 0, 0
     total = 0
     
     with torch.no_grad():
@@ -235,10 +236,10 @@ def validate_directory(model, dir_path, in_chans, device):
 # 3. Main Execution
 # ==========================================
 if __name__ == '__main__':
-    MODEL_WEIGHTS = 'model_weights/20260528_105239/model_epoch_920_acc_93.8.pth' 
+    MODEL_WEIGHTS = 'model_weights/20260706_131648/model_epoch_1195_acc_97.9.pth' 
     
     # You can set TARGET_PATH to either a specific .tif file OR a directory like 'data/test'
-    TARGET_PATH = 'data/validation/'  # Example for single file inference
+    TARGET_PATH = 'data/validation_4'  # Example for single file inference
     
     CLASSES = ['n1_m6','n1_m30','n1_m60','n1_m90','n2_m6','n2_m30','n2_m60','n2_m90'
              ,'n4_m6','n4_m30','n4_m60','n4_m90','n6_m6','n6_m30','n6_m60','n6_m90']
