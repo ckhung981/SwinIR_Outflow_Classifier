@@ -10,7 +10,7 @@ def generate_crops(
     input_dir, 
     output_dir, 
     crop_mode='random', 
-    crop_size=(512, 512), 
+    crop_size=(256, 256), 
     num_crops_per_image=10, 
     fixed_crop_config=None, 
     background_value=0, 
@@ -66,25 +66,24 @@ def generate_crops(
         h, w = img.shape[:2]
         
         if crop_mode == 'fixed':
-            # 1. 取得使用者的基礎設定
+            # 1. Get base config
             ux = fixed_crop_config['x']
             fw = fixed_crop_config['w']
             fh = fixed_crop_config['h']
             base_y_steps = fixed_crop_config['base_y_steps']
             
-            # 2. 從檔名自動擷取傾角 (預設 90 度)
+            # 2. Extract angle from filename (default 90)
             angle = 90.0 
             match = re.search(r'_(\d+)deg_', file_path.name)
             if match:
                 angle = float(match.group(1))
                 
-            # 3. 計算 2D 投影的長度壓縮比例 (sin(theta))
-            # 90度: sin(90)=1 (無壓縮) | 165度: sin(165)≈0.258 (嚴重壓縮)
+            # 3. Calculate 2D projection scale
             projection_scale = abs(math.sin(math.radians(angle)))
             
-            # 遍歷所有的裁切範圍
+            # Iterate all bounding boxes
             for box_idx, base_y in enumerate(base_y_steps):
-                # 4. 動態調整 Y 軸的起始點
+                # 4. Dynamically adjust Y start point
                 uy = int(base_y * projection_scale)
 
                 fx = int((w // 2) + ux)      
@@ -105,7 +104,6 @@ def generate_crops(
                 if x1_img < x2_img and y1_img < y2_img:
                     crop_img[y1_crop:y2_crop, x1_crop:x2_crop] = img[y1_img:y2_img, x1_img:x2_img]
                     
-                # 在檔名加上編號以區分不同的裁切範圍
                 out_filename = f"{file_path.stem}_fixed_{box_idx:02d}{file_path.suffix}"
                 out_filepath = save_dir / out_filename
                 cv2.imwrite(str(out_filepath), crop_img)
@@ -177,45 +175,138 @@ def generate_crops(
     print("-" * 40)
     print(f"Task completed! Total valid crops generated: {total_generated}")
     print(f"Output directory: {output_dir}")
+
+def pad_to_max_size(input_dir, output_dir, background_value=0):
+    """
+    Scans the entire directory to find the global maximum width and height.
+    Then applies centered padding to all images to match this maximum shape.
+    """
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
     
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
+        
+    valid_extensions = {'.tif', '.tiff', '.png'}
+    all_files = []
+    for ext in valid_extensions:
+        all_files.extend(input_path.rglob(f"*{ext}"))
+        
+    if not all_files:
+        print(f"No valid image files found in {input_dir}.")
+        return
+
+    # Pass 1: Find global maximum dimensions
+    print(f"Found {len(all_files)} images. Pass 1: Scanning for global maximum dimensions...")
+    max_h, max_w = 0, 0
+    for file_path in all_files:
+        img = cv2.imread(str(file_path), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        max_h = max(max_h, h)
+        max_w = max(max_w, w)
+        
+    print(f"Global max dimensions found: Width = {max_w}, Height = {max_h}")
+    print("-" * 40)
+    print("Pass 2: Applying centered padding to all images...")
+    
+    total_processed = 0
+    # Pass 2: Apply centered padding
+    for file_path in all_files:
+        rel_path = file_path.relative_to(input_path)
+        class_folder = rel_path.parent
+        
+        save_dir = output_path / class_folder
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        img = cv2.imread(str(file_path), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            print(f"[WARNING] Failed to read image, skipping: {file_path}")
+            continue
+            
+        h, w = img.shape[:2]
+        
+        # Calculate required padding
+        delta_w = max_w - w
+        delta_h = max_h - h
+        
+        # Distribute padding equally to center the image
+        pad_top = delta_h // 2
+        pad_bottom = delta_h - pad_top
+        pad_left = delta_w // 2
+        pad_right = delta_w - pad_left
+        
+        if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
+            padded_img = cv2.copyMakeBorder(
+                img, 
+                pad_top, pad_bottom, pad_left, pad_right, 
+                cv2.BORDER_CONSTANT, 
+                value=background_value
+            )
+        else:
+            padded_img = img
+            
+        out_filepath = save_dir / file_path.name
+        cv2.imwrite(str(out_filepath), padded_img)
+        total_processed += 1
+        
+        print(f"[SUCCESS] {file_path.name} -> Padded from ({w}x{h}) to ({max_w}x{max_h})")
+
+    print("-" * 40)
+    print(f"Task completed! Total padded images saved: {total_processed}")
+    print(f"Output directory: {output_dir}")
+
 if __name__ == "__main__":
     # ====================================================
     # User Settings
     # ====================================================
     
-    INPUT_DIRECTORY = "./resized_conv_data/train" 
-    #OUTPUT_DIRECTORY = "./data/train"
-    OUTPUT_DIRECTORY = "./data/validation"
+    # Choose operation mode: 'crop' or 'pad_to_max'
+    OPERATION_MODE = 'pad_to_max' 
     
-    CROP_MODE = 'random' # 'random' or 'fixed'
-    
-    # 針對動態裁切的設定
-    # x: 裁切框左下角的水平起點 (影像中心點為 0)
-    # w, h: 裁切框的大小
-    # base_y_steps: 以 90 度 (無壓縮) 為基準時，各切片 Y 軸的起點高度
-    DYNAMIC_FIXED_CONFIG = {
-        'x': -256,
-        'w': 512,
-        'h': 512,
-        'base_y_steps': [0, 128, 256, 384]
-    }
-    
-    # 僅用於 random 模式
-    TARGET_CROP_SIZE = (512, 512)
-    NUM_CROPS = 3
-    MIN_FEATURE_RATIO = 0.05
+    INPUT_DIRECTORY = "./resized_conv_data/validation_4"  # Directory containing original images
+    OUTPUT_DIRECTORY = "./data/validation_4"  # Directory to save processed images
     
     BG_VAL = 0 
-    DELETE_ORIGINAL_FILES = False
     
-    generate_crops(
-        input_dir=INPUT_DIRECTORY,
-        output_dir=OUTPUT_DIRECTORY,
-        crop_mode=CROP_MODE,
-        crop_size=TARGET_CROP_SIZE,
-        num_crops_per_image=NUM_CROPS,
-        fixed_crop_config=DYNAMIC_FIXED_CONFIG,
-        background_value=BG_VAL,
-        min_valid_ratio=MIN_FEATURE_RATIO,
-        delete_original=DELETE_ORIGINAL_FILES
-    )
+    if OPERATION_MODE == 'pad_to_max':
+        # Execute global maximum size centering & padding
+        pad_to_max_size(
+            input_dir=INPUT_DIRECTORY,
+            output_dir=OUTPUT_DIRECTORY,
+            background_value=BG_VAL
+        )
+        
+    elif OPERATION_MODE == 'crop':
+        # Execute original cropping logic
+        CROP_MODE = 'fixed' # 'random' or 'fixed'
+        
+        # For dynamic fixed mode
+        DYNAMIC_FIXED_CONFIG = {
+            'x': -128,
+            'w': 256,
+            'h': 256,
+            'base_y_steps': [0,32,64]
+        }
+        
+        # For random mode
+        TARGET_CROP_SIZE = (256, 256)
+        NUM_CROPS = 3
+        MIN_FEATURE_RATIO = 0.05
+        
+        DELETE_ORIGINAL_FILES = False
+        
+        generate_crops(
+            input_dir=INPUT_DIRECTORY,
+            output_dir=OUTPUT_DIRECTORY,
+            crop_mode=CROP_MODE,
+            crop_size=TARGET_CROP_SIZE,
+            num_crops_per_image=NUM_CROPS,
+            fixed_crop_config=DYNAMIC_FIXED_CONFIG,
+            background_value=BG_VAL,
+            min_valid_ratio=MIN_FEATURE_RATIO,
+            delete_original=DELETE_ORIGINAL_FILES
+        )
+    else:
+        print("Invalid OPERATION_MODE. Please choose 'crop' or 'pad_to_max'.")

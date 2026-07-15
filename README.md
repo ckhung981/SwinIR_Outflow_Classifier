@@ -6,7 +6,7 @@ source ~/swin_transformer_env/bin/activate
 # Preprocessing
 2. python trainningset_normalization.py
 3. python trainningset_covolution.py
-4. python trainningset_random_cropper.py
+4. python trainningset_cropper.py
 5. python trainningset_extract_testcase.py
 
 # Trainning
