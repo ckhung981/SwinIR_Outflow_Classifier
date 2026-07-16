@@ -11,6 +11,7 @@ import shutil
 import random
 import gc
 import re
+import torchvision.transforms as T
 
 # Ensure this imports the recognition version of SwinIR
 from models.network_swinir_recong import SwinIR 
@@ -57,9 +58,10 @@ def set_seed(seed):
 # 1. Dataset 
 # ==========================================
 class ScientificRecognitionDataset(Dataset):
-    def __init__(self, root_dir, in_chans=1):
+    def __init__(self, root_dir, in_chans=1, transform=None):
         self.root_dir = root_dir
         self.in_chans = in_chans
+        self.transform = transform
         if not os.path.exists(root_dir):
             raise FileNotFoundError(f"Directory not found: {root_dir}")
         self.classes = sorted(os.listdir(root_dir))
@@ -88,7 +90,47 @@ class ScientificRecognitionDataset(Dataset):
             img = torch.from_numpy(img).unsqueeze(0)
         else:
             img = torch.from_numpy(img).transpose(2, 0, 1)
+            
+        if self.transform is not None:
+            img = self.transform(img)
+            
         return img, label
+def save_augmented_samples(dataloader, save_dir, num_samples=10):
+    """
+    Extracts a batch from the dataloader and saves the augmented images to disk
+    so the user can visually verify the data augmentation results.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Outputting {num_samples} augmented sample images to {save_dir} ...")
+    
+    # Grab one batch of data
+    data_iter = iter(dataloader)
+    inputs, labels = next(data_iter)
+    
+    # Determine how many to save
+    save_count = min(num_samples, inputs.size(0))
+    
+    for i in range(save_count):
+        img_tensor = inputs[i]
+        
+        # Move back to CPU and convert to numpy
+        img_np = img_tensor.cpu().numpy()
+        
+        # Handle grayscale vs multi-channel
+        if img_np.shape[0] == 1:
+            img_np = img_np.squeeze(0)  # (1, H, W) -> (H, W)
+        else:
+            img_np = np.transpose(img_np, (1, 2, 0)) # (C, H, W) -> (H, W, C)
+            
+        # Un-normalize from [0.0, 1.0] back to [0, 255]
+        img_np = (img_np * 255.0).clip(0, 255).astype(np.uint8)
+        
+        # Save to file
+        file_path = os.path.join(save_dir, f"aug_sample_{i+1:02d}_label_{labels[i].item()}.png")
+        cv2.imwrite(file_path, img_np)
+        
+    print("Augmented sample images output complete")
+
 
 # ==========================================
 # 2. Validation
@@ -178,10 +220,10 @@ def main(manual_seed=None):
     params = {
         "seed": actual_seed, 
         "device": 'cuda',
-        "batch_size": 24,
+        "batch_size": 10,
         "start_epoch": 0,      # Default value, will be auto-updated if resuming
         "epochs": 1200,         
-        "lr": 5.63e-05,
+        "lr": 1e-3,
         "num_classes": 16,
         "in_chans": 1,
         "test_every": 5,
@@ -190,8 +232,8 @@ def main(manual_seed=None):
         "num_heads": [4, 4, 4, 4],
         
         # --- Resume Training Settings ---
-        "resume_path": "model_weights/20260706_131648/model_epoch_755_acc_95.3.pth", # Path to the checkpoint to resume training
-        "resume_append_dir": True # Whether to append to the existing run directory when resuming
+        "resume_path": None, # Path to the checkpoint to resume training
+        "resume_append_dir": None # Whether to append to the existing run directory when resuming
     }
 
     
@@ -250,12 +292,26 @@ def main(manual_seed=None):
             f.write(f"Starting from Epoch: {params['start_epoch']}\n\n")
 
     # --- 1. Prepare Data ---
-    train_set = ScientificRecognitionDataset('data/train', in_chans=params["in_chans"])
-    test_set = ScientificRecognitionDataset('data/test', in_chans=params["in_chans"])
+    #Data Augmentation
+    train_transform = T.Compose([
+        T.RandomAffine(
+            degrees=180,           # random rotation between -180 and 180 degrees
+            translate=(0.15, 0.15),  # random translation up to 30% of image dimensions
+            scale=(0.6, 1.4),      # random scaling between 60% and 140%
+            fill=0                 # fill the regions outside the image with 0 (assuming background is 0)
+        ),
+        T.RandomHorizontalFlip(p=0.5), # 50% probability of horizontal flip
+        T.RandomVerticalFlip(p=0.5)    # 50% probability of vertical flip
+    ])
+        
+    train_set = ScientificRecognitionDataset('data/train', in_chans=params["in_chans"], transform=train_transform)
+    test_set = ScientificRecognitionDataset('data/test', in_chans=params["in_chans"], transform=None)
     
-    train_loader = DataLoader(train_set, batch_size=params["batch_size"], shuffle=True, num_workers=2)
-    test_loader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=2) 
-    
+    train_loader = DataLoader(train_set, batch_size=params["batch_size"], shuffle=True, num_workers=0)
+    test_loader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0)
+     
+    sample_dir = os.path.join(run_dir, 'augmented_samples')
+    save_augmented_samples(train_loader, sample_dir, num_samples=10)
     # --- 2. Initialize Model ---
     model = SwinIR(
         img_size=64, #if the number is not compatible with intput image size, it will be automatically adjusted in the model's forward method
